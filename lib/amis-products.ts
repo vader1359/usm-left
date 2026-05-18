@@ -1,6 +1,6 @@
 import type { AmisProduct } from "./types"
 import { getToken } from "./amis-auth"
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs"
+import { existsSync, readFileSync, writeFileSync } from "fs"
 import { join } from "path"
 
 const API_BASE = process.env.AMIS_API_URL || "https://crmconnect.misa.vn/api/v2"
@@ -10,8 +10,8 @@ const CACHE_PATH = join(process.cwd(), "data", "usm-products.json")
 let cachedProducts: AmisProduct[] | null = null
 
 function loadCache(): AmisProduct[] {
-  if (!existsSync(CACHE_PATH)) return []
   try {
+    if (!existsSync(CACHE_PATH)) return []
     const raw = readFileSync(CACHE_PATH, "utf-8")
     return JSON.parse(raw)
   } catch {
@@ -20,8 +20,11 @@ function loadCache(): AmisProduct[] {
 }
 
 function saveCache(products: AmisProduct[]) {
-  mkdirSync(join(process.cwd(), "data"), { recursive: true })
-  writeFileSync(CACHE_PATH, JSON.stringify(products, null, 2))
+  try {
+    writeFileSync(CACHE_PATH, JSON.stringify(products, null, 2))
+  } catch {
+    // read-only filesystem (Vercel) — ignore
+  }
 }
 
 async function fetchPage(page: number): Promise<AmisProduct[]> {
@@ -107,11 +110,12 @@ export async function fetchAmisProducts(): Promise<AmisProduct[]> {
     return local
   }
 
-  // No cache — full fetch, stop at cutoff date 2026-05-18
+  // No cache — limited fetch (Vercel-safe, max 20 pages)
   const products: AmisProduct[] = []
   let page = 0
+  const maxPages = 20
 
-  while (true) {
+  while (page < maxPages) {
     try {
       const items = await fetchPage(page)
       if (items.length === 0) break
@@ -120,11 +124,6 @@ export async function fetchAmisProducts(): Promise<AmisProduct[]> {
       page++
 
       if (items.length < 100) break
-
-      // Save intermediate every 50 pages
-      if (page % 50 === 0) {
-        saveCache(products)
-      }
     } catch {
       break
     }
