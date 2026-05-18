@@ -77,10 +77,14 @@ export async function POST(request: Request) {
       // AMIS unavailable — fall back to stock file names
     }
 
-    // Fill in missing product names/images from stock file data
+    // Enrich product map with stock file data
+    // Stock file is primary for images (AMIS may not have avatar for all)
     for (const row of stockRows) {
-      if (!productMap.has(row.sku)) {
+      const existing = productMap.get(row.sku)
+      if (!existing) {
         productMap.set(row.sku, { name: row.name, imageUuid: row.imageUuid })
+      } else if (!existing.imageUuid && row.imageUuid) {
+        existing.imageUuid = row.imageUuid
       }
     }
 
