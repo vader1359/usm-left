@@ -1,0 +1,31 @@
+{
+  "name": "usm-left",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "biome check",
+    "format": "biome check --write"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^6.2.3",
+    "@radix-ui/react-separator": "^1.1.8",
+    "antd": "^6.4.2",
+    "babel-plugin-react-compiler": "^1.0.0",
+    "next": "^16.2.6",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@tailwindcss/postcss": "^4.1.5",
+    "@types/node": "25.8.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "tailwindcss": "^4.1.5",
+    "typescript": "^5.8.0"
+  }
+}
