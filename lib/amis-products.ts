@@ -1,23 +1,14 @@
 import type { AmisProduct } from "./types"
 import { getToken } from "./amis-auth"
-import { existsSync, readFileSync, writeFileSync } from "fs"
+import { writeFileSync } from "fs"
 import { join } from "path"
+import prebuiltProducts from "@/data/usm-products.json"
 
 const API_BASE = process.env.AMIS_API_URL || "https://crmconnect.misa.vn/api/v2"
 const APP_ID = process.env.AMIS_APP_ID || "nanohome"
 const CACHE_PATH = join(process.cwd(), "data", "usm-products.json")
 
 let cachedProducts: AmisProduct[] | null = null
-
-function loadCache(): AmisProduct[] {
-  try {
-    if (!existsSync(CACHE_PATH)) return []
-    const raw = readFileSync(CACHE_PATH, "utf-8")
-    return JSON.parse(raw)
-  } catch {
-    return []
-  }
-}
 
 function saveCache(products: AmisProduct[]) {
   try {
@@ -63,12 +54,10 @@ async function fetchPage(page: number): Promise<AmisProduct[]> {
 export async function fetchAmisProducts(): Promise<AmisProduct[]> {
   if (cachedProducts) return cachedProducts
 
-  const local = loadCache()
+  const local = prebuiltProducts as AmisProduct[]
   if (local.length > 0) {
-    // Incremental: fetch only pages newer than our latest cached date
-    // All products sorted by modified_date DESC, so start from page 0
-    // Stop when we encounter a SKU already in cache
-    const cacheSkus = new Set(local.map((p) => p.sku))
+    // Incremental: fetch only pages newer than our cached data
+    const cacheSkus = new Set(local.map((p: AmisProduct) => p.sku))
     const newProducts: AmisProduct[] = []
     let page = 0
     let stopFetching = false
@@ -87,8 +76,7 @@ export async function fetchAmisProducts(): Promise<AmisProduct[]> {
           }
         }
 
-        if (foundExisting && newProducts.length > 0) {
-          // We've caught up — stop after this page
+        if (foundExisting) {
           stopFetching = true
         }
 
@@ -110,7 +98,7 @@ export async function fetchAmisProducts(): Promise<AmisProduct[]> {
     return local
   }
 
-  // No cache — limited fetch (Vercel-safe, max 20 pages)
+  // No prebuilt cache — limited API fetch
   const products: AmisProduct[] = []
   let page = 0
   const maxPages = 20
@@ -119,17 +107,14 @@ export async function fetchAmisProducts(): Promise<AmisProduct[]> {
     try {
       const items = await fetchPage(page)
       if (items.length === 0) break
-
       products.push(...items)
       page++
-
       if (items.length < 100) break
     } catch {
       break
     }
   }
 
-  saveCache(products)
   cachedProducts = products
   return products
 }
