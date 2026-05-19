@@ -1,4 +1,4 @@
-import type { BOM, Stock, Mode, CabinetResult, ProductMap, CalculateResponse } from "./types"
+import type { BOM, Stock, Mode, CabinetResult, ProductMap, CalculateResponse, MissingPart, CabinetShortage } from "./types"
 
 function howManyCanBuild(
   cabinetSku: string,
@@ -105,6 +105,18 @@ function calculateIndependent(
   return results
 }
 
+function sortByPartCount(
+  cabinetSkus: string[],
+  bom: BOM,
+  ascending: boolean,
+): string[] {
+  return [...cabinetSkus].sort((a, b) => {
+    const sumA = bom.get(a)?.reduce((s, p) => s + p.qty, 0) ?? 0
+    const sumB = bom.get(b)?.reduce((s, p) => s + p.qty, 0) ?? 0
+    return ascending ? sumA - sumB : sumB - sumA
+  })
+}
+
 export function optimize(
   cabinetSkus: string[],
   bom: BOM,
@@ -114,6 +126,16 @@ export function optimize(
 ): Map<string, number> {
   if (mode === "independent") {
     return calculateIndependent(cabinetSkus, bom, stock)
+  }
+
+  if (mode === "small-first") {
+    const sorted = sortByPartCount(cabinetSkus, bom, true)
+    return calculatePrioritized(sorted, bom, stock)
+  }
+
+  if (mode === "large-first") {
+    const sorted = sortByPartCount(cabinetSkus, bom, false)
+    return calculatePrioritized(sorted, bom, stock)
   }
 
   if (mode === "prioritized" && priorities && priorities.length > 0) {
@@ -142,6 +164,12 @@ export function computeResults(
 
   const producible = optimize(cabinetSkus, bom, stockMap, mode, priorities)
 
+  // Compute remaining stock after production
+  const remainingStock = new Map(stock)
+  for (const [sku, count] of producible) {
+    deduct(sku, bom, remainingStock, count)
+  }
+
   const totalInitial = stockMap.size
   let consumedCount = 0
 
@@ -160,8 +188,55 @@ export function computeResults(
     })
     .sort((a, b) => b.producible - a.producible)
 
+  // Compute shortages for all cabinets (against remaining stock)
+  const shortages: CabinetShortage[] = []
+  for (const sku of cabinetSkus) {
+    const product = products.get(sku)
+    const parts = bom.get(sku)
+    if (!parts || parts.length === 0) continue
+
+    const canBuildMore = howManyCanBuild(sku, bom, remainingStock)
+
+    const missingPartsList: MissingPart[] = []
+    for (const { partSku, qty } of parts) {
+      const availableQty = remainingStock.get(partSku) ?? 0
+      const missingQty = Math.max(0, qty - availableQty)
+      if (missingQty > 0) {
+        const partInfo = products.get(partSku)
+        missingPartsList.push({
+          partSku,
+          partName: partInfo?.name ?? partSku,
+          partImageUrl: partInfo?.imageUuid ?? "",
+          requiredQty: qty,
+          availableQty,
+          missingQty,
+        })
+      }
+    }
+
+    shortages.push({
+      cabinetSku: sku,
+      cabinetName: product?.name ?? sku,
+      imageUrl: product?.imageUuid ?? "",
+      canBuildMore,
+      totalParts: parts.length,
+      missingParts: missingPartsList.length,
+      totalMissingQty: missingPartsList.reduce((s, m) => s + m.missingQty, 0),
+      completenessPct: parts.length > 0 ? Math.round(((parts.length - missingPartsList.length) / parts.length) * 100) : 100,
+      missingPartsList,
+    })
+  }
+
+  // Sort: cabinets with fewest total missing qty first (closest to buildable)
+  shortages.sort((a, b) => {
+    if (a.totalMissingQty !== b.totalMissingQty) return a.totalMissingQty - b.totalMissingQty
+    if (a.missingParts !== b.missingParts) return a.missingParts - b.missingParts
+    return b.canBuildMore - a.canBuildMore
+  })
+
   return {
     results,
+    shortages,
     summary: {
       totalCabinets: results.reduce((sum, r) => sum + r.producible, 0),
       partsConsumed: consumedCount,

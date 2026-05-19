@@ -1,13 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Card, Button, App } from "antd"
-import { LoadingOutlined } from "@ant-design/icons"
 import { FileUpload } from "@/components/file-upload"
 import { ModeToggle } from "@/components/mode-toggle"
 import { PrioritySort } from "@/components/priority-sort"
 import { ResultTable } from "@/components/result-table"
-import type { Mode, CabinetResult } from "@/lib/types"
+import { StockTable } from "@/components/stock-table"
+import { ShortageTable } from "@/components/shortage-table"
+import type { Mode, CabinetResult, StockItem, CabinetShortage } from "@/lib/types"
 
 interface Summary {
   totalCabinets: number
@@ -19,13 +20,13 @@ interface ApiResult {
   success: boolean
   results: CabinetResult[]
   summary: Summary
+  stockItems?: StockItem[]
+  componentItems?: StockItem[]
+  shortages?: CabinetShortage[]
   error?: string
 }
 
 export default function Home() {
-  const [productsLoaded, setProductsLoaded] = useState(false)
-  const [productCount, setProductCount] = useState(0)
-  const [loadingProducts, setLoadingProducts] = useState(false)
   const [assemblyFile, setAssemblyFile] = useState<File | null>(null)
   const [stockFile, setStockFile] = useState<File | null>(null)
   const [mode, setMode] = useState<Mode>("independent")
@@ -34,55 +35,41 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [results, setResults] = useState<CabinetResult[] | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
+  const [stockItems, setStockItems] = useState<StockItem[]>([])
+  const [componentItems, setComponentItems] = useState<StockItem[]>([])
+  const [shortages, setShortages] = useState<CabinetShortage[]>([])
 
   const { message } = App.useApp()
 
-  const loadProducts = async () => {
-    setLoadingProducts(true)
-    try {
-      const res = await fetch("/api/products")
-      const data = await res.json()
-      if (data.success) {
-        setProductCount(data.count)
-        setProductsLoaded(true)
-        if (!assemblyFile) {
-          try {
-            const asmRes = await fetch("/assembly.xlsx")
-            if (asmRes.ok) {
-              const blob = await asmRes.blob()
-              setAssemblyFile(
-                new File([blob], "assembly.xlsx", {
-                  type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                }),
-              )
-            }
-          } catch { /* ignore */ }
+  useEffect(() => {
+    async function loadDefaults() {
+      try {
+        const asmRes = await fetch("/assembly.xlsx")
+        if (asmRes.ok) {
+          const blob = await asmRes.blob()
+          setAssemblyFile(
+            new File([blob], "assembly.xlsx", {
+              type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            }),
+          )
         }
-        if (!stockFile) {
-          try {
-            const stkRes = await fetch("/stock.xlsx")
-            if (stkRes.ok) {
-              const blob = await stkRes.blob()
-              setStockFile(
-                new File([blob], "stock.xlsx", {
-                  type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                }),
-              )
-            }
-          } catch { /* ignore */ }
+      } catch { /* ignore */ }
+      try {
+        const stkRes = await fetch("/stock.xlsx")
+        if (stkRes.ok) {
+          const blob = await stkRes.blob()
+          setStockFile(
+            new File([blob], "stock.xlsx", {
+              type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            }),
+          )
         }
-        message.success(`${data.count} USM products loaded, default assembly & stock loaded`)
-      } else {
-        message.error(data.error || "Failed to load products")
-      }
-    } catch {
-      message.error("Network error loading products from AMIS")
-    } finally {
-      setLoadingProducts(false)
+      } catch { /* ignore */ }
     }
-  }
+    loadDefaults()
+  }, [])
 
-  const handleCalculate = async () => {
+  const handleCalculate = useCallback(async () => {
     if (!assemblyFile || !stockFile) {
       message.warning("Please upload both assembly and stock files")
       return
@@ -103,6 +90,9 @@ export default function Home() {
       if (data.success && data.results) {
         setResults(data.results)
         setSummary(data.summary)
+        setStockItems(data.stockItems ?? [])
+        setComponentItems(data.componentItems ?? [])
+        setShortages(data.shortages ?? [])
         setCabinetList(data.results.map((r) => ({ sku: r.sku, name: r.name })))
         message.success(
           `Calculated: ${data.summary.totalCabinets} cabinets across ${data.results.length} types`,
@@ -115,9 +105,15 @@ export default function Home() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [assemblyFile, stockFile, mode, priorities, message])
 
-  const canCalculate = assemblyFile && stockFile && productsLoaded
+  useEffect(() => {
+    if (assemblyFile && stockFile) {
+      handleCalculate()
+    }
+  }, [mode, priorities])
+
+  const canCalculate = assemblyFile && stockFile
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 16px" }}>
@@ -129,30 +125,15 @@ export default function Home() {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16, width: "100%" }}>
-        <Card title="Step 1: Load Products" size="small">
-          <Button
-            type={productsLoaded ? "default" : "primary"}
-            icon={loadingProducts ? <LoadingOutlined /> : undefined}
-            onClick={loadProducts}
-            loading={loadingProducts}
-          >
-            {productsLoaded ? `${productCount} products loaded` : "Load Products from AMIS"}
-          </Button>
-          {productsLoaded && (
-            <span style={{ marginLeft: 12, color: "#16a34a", fontWeight: 500, fontSize: 13 }}>
-              Cached locally
-            </span>
-          )}
-        </Card>
 
-        <Card title="Step 2: Upload Files" size="small">
+        <Card title="Step 1: Upload Files" size="small">
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <FileUpload label="Assembly File (.xlsx)" accept=".xlsx" file={assemblyFile} onFile={setAssemblyFile} />
             <FileUpload label="Stock File (.xlsx)" accept=".xlsx" file={stockFile} onFile={setStockFile} />
           </div>
         </Card>
 
-        <Card title="Step 3: Choose Mode" size="small">
+        <Card title="Step 2: Choose Mode" size="small">
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <ModeToggle mode={mode} onChange={setMode} />
             {mode === "prioritized" && cabinetList.length > 0 && (
@@ -161,7 +142,7 @@ export default function Home() {
           </div>
         </Card>
 
-        <Card title="Step 4: Calculate" size="small">
+        <Card title="Step 3: Calculate" size="small">
           <Button
             type="primary"
             size="large"
@@ -171,12 +152,7 @@ export default function Home() {
           >
             Calculate
           </Button>
-          {!productsLoaded && (
-            <p style={{ marginTop: 8, fontSize: 12, color: "#f59e0b" }}>
-              Load products from AMIS first.
-            </p>
-          )}
-          {productsLoaded && (!assemblyFile || !stockFile) && (
+          {(!assemblyFile || !stockFile) && (
             <p style={{ marginTop: 8, fontSize: 12, color: "#f59e0b" }}>
               Upload both files first.
             </p>
@@ -198,6 +174,54 @@ export default function Home() {
             size="small"
           >
             <ResultTable results={results} />
+          </Card>
+        )}
+
+        {shortages.length > 0 && (
+          <Card
+            title={
+              <span>
+                Thiếu linh kiện
+                <span style={{ marginLeft: 12, fontWeight: 400, fontSize: 13, color: "#888" }}>
+                  {shortages.length} cabinets &middot; sorted by fewest missing parts
+                </span>
+              </span>
+            }
+            size="small"
+          >
+            <ShortageTable shortages={shortages} />
+          </Card>
+        )}
+
+        {stockItems.length > 0 && (
+          <Card
+            title={
+              <span>
+                Stock
+                <span style={{ marginLeft: 12, fontWeight: 400, fontSize: 13, color: "#888" }}>
+                  {stockItems.length} types
+                </span>
+              </span>
+            }
+            size="small"
+          >
+            <StockTable items={stockItems} />
+          </Card>
+        )}
+
+        {componentItems.length > 0 && (
+          <Card
+            title={
+              <span>
+                Linh kiện
+                <span style={{ marginLeft: 12, fontWeight: 400, fontSize: 13, color: "#888" }}>
+                  {componentItems.length} types
+                </span>
+              </span>
+            }
+            size="small"
+          >
+            <StockTable items={componentItems} />
           </Card>
         )}
       </div>

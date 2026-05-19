@@ -17,6 +17,8 @@ export function ModeToggle({ mode, onChange }: ModeToggleProps) {
         { label: "All Possible", value: "independent" },
         { label: "Maximize Total", value: "maximize" },
         { label: "Prioritized", value: "prioritized" },
+        { label: "Small First", value: "small-first" },
+        { label: "Large First", value: "large-first" },
       ]}
     />
   )

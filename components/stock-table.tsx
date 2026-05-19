@@ -1,15 +1,15 @@
 "use client"
 
 import { Table, Empty } from "antd"
-import type { CabinetResult } from "@/lib/types"
+import type { StockItem } from "@/lib/types"
 
-interface ResultTableProps {
-  results: CabinetResult[]
+interface StockTableProps {
+  items: StockItem[]
 }
 
-export function ResultTable({ results }: ResultTableProps) {
-  if (results.length === 0) {
-    return <Empty description="No cabinets can be produced with current stock." />
+export function StockTable({ items }: StockTableProps) {
+  if (items.length === 0) {
+    return <Empty description="No stock items found." />
   }
 
   const columns = [
@@ -18,7 +18,7 @@ export function ResultTable({ results }: ResultTableProps) {
       dataIndex: "imageUrl",
       key: "image",
       width: 116,
-      render: (url: string, row: CabinetResult) =>
+      render: (url: string, row: StockItem) =>
         url ? (
           <img src={url} alt={row.name} style={{ width: 100, height: 100, objectFit: "contain" }} />
         ) : (
@@ -40,7 +40,7 @@ export function ResultTable({ results }: ResultTableProps) {
     },
     {
       title: "Qty",
-      dataIndex: "producible",
+      dataIndex: "availableQty",
       key: "qty",
       width: 80,
       align: "center" as const,
@@ -53,12 +53,12 @@ export function ResultTable({ results }: ResultTableProps) {
   return (
     <Table
       columns={columns}
-      dataSource={results}
+      dataSource={items}
       rowKey="sku"
       pagination={false}
       size="small"
       bordered
-      scroll={{ y: 600 }}
+      scroll={{ y: 400 }}
     />
   )
 }

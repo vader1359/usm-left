@@ -19,7 +19,7 @@ export function parseAssemblyExcel(buffer: ArrayBuffer): BomRow[] {
     const partSku = String(row[4] ?? "").trim()
     const qtyRaw = String(row[7] ?? "").trim()
 
-    if (!cabinetSku.startsWith("USM")) continue
+    if (!cabinetSku.startsWith("USMUS0") && !cabinetSku.startsWith("USMUS2")) continue
     if (!partSku) continue
 
     const qty = parseFloat(qtyRaw.replace(/,/g, ""))

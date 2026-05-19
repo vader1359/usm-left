@@ -1,8 +1,26 @@
+import fs from "node:fs"
+import path from "node:path"
 import { parseAssemblyExcel, parseStockExcel } from "@/lib/parser"
 import { computeResults } from "@/lib/optimizer"
-import { fetchAmisProducts } from "@/lib/amis-products"
 import { getImageUrl } from "@/lib/image-url"
-import type { BOM, Stock, ProductMap, Mode, BomRow, StockRow } from "@/lib/types"
+import type { BOM, Stock, ProductMap, Mode, BomRow, StockRow, StockItem } from "@/lib/types"
+
+interface ProductJson {
+  sku: string
+  name: string
+  imageUuid: string
+  modifiedDate?: string
+}
+
+let productJsonCache: ProductJson[] | null = null
+
+function loadProductJson(): ProductJson[] {
+  if (productJsonCache) return productJsonCache
+  const jsonPath = path.join(process.cwd(), "data", "usm-products.json")
+  const raw = fs.readFileSync(jsonPath, "utf-8")
+  productJsonCache = JSON.parse(raw) as ProductJson[]
+  return productJsonCache
+}
 
 export async function POST(request: Request) {
   try {
@@ -19,9 +37,9 @@ export async function POST(request: Request) {
       )
     }
 
-    if (mode !== "maximize" && mode !== "prioritized" && mode !== "independent") {
+    if (mode !== "maximize" && mode !== "prioritized" && mode !== "independent" && mode !== "small-first" && mode !== "large-first") {
       return Response.json(
-        { error: "Mode must be 'maximize', 'prioritized', or 'independent'" },
+        { error: "Mode must be 'maximize', 'prioritized', 'independent', 'small-first', or 'large-first'" },
         { status: 400 },
       )
     }
@@ -67,31 +85,40 @@ export async function POST(request: Request) {
       }
     }
 
-    let productMap: ProductMap = new Map()
-    try {
-      const amisProducts = await fetchAmisProducts()
-      for (const p of amisProducts) {
-        productMap.set(p.sku, { name: p.name, imageUuid: p.imageUuid })
-      }
-    } catch {
-      // AMIS unavailable — fall back to stock file names
+    const products = loadProductJson()
+    const productMap: ProductMap = new Map()
+    for (const p of products) {
+      productMap.set(p.sku, { name: p.name, imageUuid: p.imageUuid })
     }
 
-    // Enrich product map with stock file data
-    // Stock file is primary for images (AMIS may not have avatar for all)
+    // Enrich with stock file (fallback for SKUs not in JSON)
     for (const row of stockRows) {
-      const existing = productMap.get(row.sku)
-      if (!existing) {
+      if (!productMap.has(row.sku)) {
         productMap.set(row.sku, { name: row.name, imageUuid: row.imageUuid })
-      } else if (!existing.imageUuid && row.imageUuid) {
-        existing.imageUuid = row.imageUuid
       }
     }
 
-    // Resolve image URLs
-    for (const [sku, info] of productMap) {
-      if (info.imageUuid) {
+    // Convert UUIDs to full image URLs; skip values that are already URLs
+    for (const [, info] of productMap) {
+      if (info.imageUuid && !info.imageUuid.startsWith("http")) {
         info.imageUuid = getImageUrl(info.imageUuid)
+      }
+    }
+
+    const stockItems: StockItem[] = []
+    const componentItems: StockItem[] = []
+    for (const row of stockRows) {
+      const info = productMap.get(row.sku)
+      const item: StockItem = {
+        sku: row.sku,
+        name: info?.name ?? row.name,
+        imageUrl: info?.imageUuid ?? "",
+        availableQty: row.availableQty,
+      }
+      if (row.sku.startsWith("USMUS-") || row.sku.startsWith("USMUS0") || row.sku.startsWith("USMUS2")) {
+        componentItems.push(item)
+      } else {
+        stockItems.push(item)
       }
     }
 
@@ -100,6 +127,8 @@ export async function POST(request: Request) {
     return Response.json({
       success: true,
       ...response,
+      stockItems,
+      componentItems,
       meta: {
         cabinetTypes: bom.size,
         partTypes: stock.size,
